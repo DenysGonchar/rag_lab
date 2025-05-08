@@ -27,28 +27,51 @@ defmodule Exmeralda.Topics.IngestLibraryWorker do
 
   def ingest(multi) do
     multi
-    |> Multi.run(:ingestion, fn _, %{library: library} ->
+    |> ingest_from_hex()
+    |> update_dependencies()
+    |> insert_chunks()
+    |> queue_embeddings_generation()
+    |> run_transaction_and_handle_result()
+  end
+
+  # Private helpers for ingest pipeline
+
+  defp ingest_from_hex(multi) do
+    Multi.run(multi, :ingestion, fn _, %{library: library} ->
       Rag.ingest_from_hex(library.name, library.version)
     end)
-    |> Multi.update(:dependencies, fn %{library: library, ingestion: {_, dependencies}} ->
+  end
+
+  defp update_dependencies(multi) do
+    Multi.update(multi, :dependencies, fn %{library: library, ingestion: {_, dependencies}} ->
       Library.changeset(library, %{dependencies: dependencies})
     end)
-    |> Ecto.Multi.merge(fn %{ingestion: {chunks, _}, library: library} ->
+  end
+
+  defp insert_chunks(multi) do
+    Ecto.Multi.merge(multi, fn %{ingestion: {chunks, _}, library: library} ->
       chunks
       |> Enum.chunk_every(@insert_batch_size)
       |> Enum.with_index()
-      |> Enum.reduce(Multi.new(), fn {batch, index}, multi ->
+      |> Enum.reduce(Multi.new(), fn {batch, index}, multi_acc ->
         Multi.insert_all(
-          multi,
+          multi_acc,
           :"chunks_#{index}",
           Chunk,
           Enum.map(batch, &Map.put(&1, :library_id, library.id))
         )
       end)
     end)
-    |> Oban.insert(:generate_embeddings, fn %{library: library} ->
+  end
+
+  defp queue_embeddings_generation(multi) do
+    Oban.insert(multi, :generate_embeddings, fn %{library: library} ->
       GenerateEmbeddingsWorker.new(%{library_id: library.id})
     end)
+  end
+
+  defp run_transaction_and_handle_result(multi) do
+    multi
     |> Repo.transaction(timeout: 1000 * 60 * 60)
     |> case do
       {:ok, _} -> :ok
