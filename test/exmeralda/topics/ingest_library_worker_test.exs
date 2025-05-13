@@ -17,7 +17,16 @@ defmodule Exmeralda.Topics.IngestLibraryWorkerTest do
 
       assert :ok = perform_job(IngestLibraryWorker, %{name: "rag", version: "0.1.0"})
 
-      assert rag = Repo.get_by(Library, name: "rag", version: "0.1.0") |> Repo.preload(:chunks)
+      assert rag =
+               Repo.get_by(Library, name: "rag", version: "0.1.0")
+               |> Repo.preload([:chunks, :embedding_sets])
+
+      embedding_sets = rag.embedding_sets
+      assert length(embedding_sets) == 1
+      embedding_set = rag.embedding_sets |> List.first()
+      assert embedding_set.state == :queued
+
+      assert Library.find_current_embedding_set(rag).id == embedding_set.id
 
       assert rag.dependencies
              |> Enum.map(&{&1.name, &1.version_requirement, optional: &1.optional})
@@ -41,6 +50,7 @@ defmodule Exmeralda.Topics.IngestLibraryWorkerTest do
 
       for source <- ["Rag.Telemetry.html", "mix.exs"] do
         assert chunk = Enum.find(rag.chunks, &(&1.source == source))
+        assert chunk.embedding_set_id == embedding_set.id
         refute chunk.embedding
         assert is_binary(chunk.content)
       end

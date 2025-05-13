@@ -31,7 +31,7 @@ defmodule Exmeralda.Factory do
 
   def library_factory do
     %Exmeralda.Topics.Library{
-      name: "ecto",
+      name: sequence(:library_name, &"library_#{&1}"),
       version: "3.12.5",
       dependencies: [
         build(:library_dependency, name: "decimal", version_requirement: "~> 2.0"),
@@ -66,10 +66,24 @@ defmodule Exmeralda.Factory do
   def chunk_factory do
     %Exmeralda.Topics.Chunk{
       library: build(:library),
+      embedding_set: build(:embedding_set),
       content: "I am a message",
       embedding: Enum.map(1..768, fn _ -> :rand.uniform() end),
       source: "file.ex",
       type: :code
+    }
+  end
+
+  def embedding_set_factory do
+    %Exmeralda.Topics.EmbeddingSet{
+      state: :queued
+    }
+  end
+
+  def library_embedding_set_factory do
+    %Exmeralda.Topics.LibraryEmbeddingSet{
+      library: build(:library),
+      embedding_set: build(:embedding_set)
     }
   end
 end

@@ -2,7 +2,16 @@ defmodule Exmeralda.Topics.IngestLibraryWorker do
   use Oban.Worker, queue: :ingest, max_attempts: 20, unique: [period: {360, :minutes}]
 
   alias Exmeralda.Repo
-  alias Exmeralda.Topics.{Chunk, Library, Rag, GenerateEmbeddingsWorker}
+
+  alias Exmeralda.Topics.{
+    Chunk,
+    Library,
+    Rag,
+    GenerateEmbeddingsWorker,
+    EmbeddingSet,
+    LibraryEmbeddingSet
+  }
+
   alias Ecto.Multi
   import Ecto.Query
 
@@ -22,6 +31,20 @@ defmodule Exmeralda.Topics.IngestLibraryWorker do
   def perform(%Oban.Job{args: args}) do
     Multi.new()
     |> Multi.insert(:library, Library.changeset(%Library{}, args))
+    |> Multi.insert(:embedding_set, EmbeddingSet.changeset(%EmbeddingSet{}, %{}))
+    |> Multi.run(:associate_embedding_set, fn repo,
+                                              %{
+                                                library: library,
+                                                embedding_set: embedding_set
+                                              } ->
+      library_embedding_set =
+        LibraryEmbeddingSet.changeset(%LibraryEmbeddingSet{}, %{
+          library_id: library.id,
+          embedding_set_id: embedding_set.id
+        })
+
+      {:ok, repo.insert!(library_embedding_set)}
+    end)
     |> ingest()
   end
 
@@ -49,7 +72,11 @@ defmodule Exmeralda.Topics.IngestLibraryWorker do
   end
 
   defp insert_chunks(multi) do
-    Ecto.Multi.merge(multi, fn %{ingestion: {chunks, _}, library: library} ->
+    Ecto.Multi.merge(multi, fn %{
+                                 ingestion: {chunks, _},
+                                 library: library,
+                                 embedding_set: embedding_set
+                               } ->
       chunks
       |> Enum.chunk_every(@insert_batch_size)
       |> Enum.with_index()
@@ -59,14 +86,15 @@ defmodule Exmeralda.Topics.IngestLibraryWorker do
           :"chunks_#{index}",
           Chunk,
           Enum.map(batch, &Map.put(&1, :library_id, library.id))
+          |> Enum.map(&Map.put(&1, :embedding_set_id, embedding_set.id))
         )
       end)
     end)
   end
 
   defp queue_embeddings_generation(multi) do
-    Oban.insert(multi, :generate_embeddings, fn %{library: library} ->
-      GenerateEmbeddingsWorker.new(%{library_id: library.id})
+    Oban.insert(multi, :generate_embeddings, fn %{library: library, embedding_set: embedding_set} ->
+      GenerateEmbeddingsWorker.new(%{library_id: library.id, embedding_set_id: embedding_set.id})
     end)
   end
 

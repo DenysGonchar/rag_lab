@@ -87,4 +87,32 @@ defmodule Exmeralda.Topics.LibraryTest do
       assert_error_on(telemetry, :version_requirement, :version_requirement)
     end
   end
+
+  describe "find_current_embedding_set/1" do
+    test "returns the most recent 'ready' embedding set if present, otherwise the most recent one" do
+      library = insert(:library)
+      # Insert a non-ready embedding set
+      old_set = insert(:embedding_set, state: :chunking)
+      insert(:library_embedding_set, library: library, embedding_set: old_set)
+      # Insert a ready embedding set, but older
+      ready_set_old = insert(:embedding_set, state: :ready, inserted_at: ~N[2023-01-01 00:00:00])
+      insert(:library_embedding_set, library: library, embedding_set: ready_set_old)
+      # Insert a newer ready embedding set
+      ready_set_new = insert(:embedding_set, state: :ready, inserted_at: ~N[2023-02-01 00:00:00])
+      insert(:library_embedding_set, library: library, embedding_set: ready_set_new)
+
+      found = Library.find_current_embedding_set(library)
+      assert found.id == ready_set_new.id
+
+      # If no ready embedding set, returns the most recent one
+      library2 = insert(:library)
+      set1 = insert(:embedding_set, state: :chunking, inserted_at: ~N[2023-03-01 00:00:00])
+      set2 = insert(:embedding_set, state: :embedding, inserted_at: ~N[2023-04-01 00:00:00])
+      insert(:library_embedding_set, library: library2, embedding_set: set1)
+      insert(:library_embedding_set, library: library2, embedding_set: set2)
+
+      found2 = Library.find_current_embedding_set(library2)
+      assert found2.id == set2.id
+    end
+  end
 end
