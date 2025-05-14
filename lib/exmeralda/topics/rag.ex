@@ -10,7 +10,7 @@ defmodule Exmeralda.Topics.Rag do
 
   @doc_types ~w(.html .md .txt)
   @chunk_size 2000
-  @retrieval_weights %{fulltext_results: 1, semantic_results: 1}
+  @retrieval_weights %{fulltext_results: 0, semantic_results: 1}
   @pgvector_limit 3
   @fulltext_limit 3
   @excluded_docs ~w(404.html)
@@ -29,6 +29,62 @@ defmodule Exmeralda.Topics.Rag do
                        seperators: LanguageSeparators.markdown(),
                        chunk_size: @chunk_size
                      })
+
+  @doc """
+  Reads the contents of a file from a repository path and a relative path.
+  """
+  def read_file(repo_path, relative_path) do
+    Path.join(repo_path, relative_path)
+    |> File.read!()
+  end
+
+  def ingest_from_git_repository(repo_path) do
+    chunks =
+      trivial_ingestion(repo_path)
+
+    {:ok, chunks}
+  end
+
+  defp trivial_ingestion(repo_path) do
+    ls_files(repo_path)
+    |> Enum.flat_map(fn relative_path ->
+      content =
+        read_file(repo_path, relative_path)
+
+      # Skip if file couldn't be read or fails validation
+      if String.valid?(content) &&
+           LineCheck.valid?(content) &&
+           Path.extname(relative_path) not in @excluded_code_types do
+        # Process content into chunks
+        create_chunks(relative_path, content)
+      else
+        []
+      end
+    end)
+  end
+
+  defp create_chunks(relative_path, content) do
+    chunk_text(relative_path, content)
+    |> Enum.map(fn chunk ->
+      %{
+        source: relative_path,
+        type: :code,
+        content: chunk
+        # content: "# #{relative_path}\n\n#{chunk}"
+      }
+    end)
+  end
+
+  def ls_files(repo_path) do
+    repo = Git.new(repo_path)
+
+    Git.ls_files!(repo)
+    |> split_output()
+  end
+
+  defp split_output(raw) do
+    String.split(raw, "\n", trim: true)
+  end
 
   def ingest_from_hex(name, version) do
     with {:ok, exdocs} <- Hex.docs(name, version),

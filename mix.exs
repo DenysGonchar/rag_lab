@@ -73,7 +73,8 @@ defmodule Exmeralda.MixProject do
       {:pgvector, "~> 0.3.0"},
       {:flop, "~> 0.26.1"},
       {:flop_phoenix, "~> 0.24.1"},
-      {:appsignal_phoenix, "~> 2.7"}
+      {:appsignal_phoenix, "~> 2.7"},
+      {:git_cli, "~> 0.3"}
     ]
   end
 
